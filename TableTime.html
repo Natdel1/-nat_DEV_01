@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test System with Immutable History</title>
+    <style>
+        :root { --primary: #1a73e8; --bg: #f8fafc; --dark: #1e293b; --history: #64748b; }
+        body { font-family: 'Segoe UI', Tahoma, sans-serif; background-color: var(--bg); padding: 20px; color: var(--dark); }
+        .container { max-width: 1100px; margin: auto; background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); }
+        
+        h2, h3 { color: var(--primary); }
+        .section { background: #f1f5f9; padding: 20px; border-radius: 10px; margin-bottom: 25px; border: 1px solid #e2e8f0; }
+        .row { display: flex; gap: 15px; align-items: flex-end; flex-wrap: wrap; }
+        
+        input, select { padding: 10px; border: 1px solid #cbd5e1; border-radius: 6px; }
+        button { padding: 10px 20px; border-radius: 6px; border: none; cursor: pointer; font-weight: bold; transition: 0.2s; }
+        .btn-save { background: #059669; color: white; }
+        .btn-add { background: var(--primary); color: white; }
+        .btn-print { background: #475569; color: white; margin-left: 10px; }
+
+        /* Table Styling */
+        table { width: 100%; border-collapse: collapse; background: white; }
+        th { background: #334155; color: white; padding: 12px; text-align: left; }
+        td { padding: 10px 12px; border-bottom: 1px solid #f1f5f9; }
+
+        .status-select { width: 100%; padding: 6px; border-radius: 4px; font-weight: bold; }
+        .PASSED { background-color: #dcfce7; color: #166534; }
+        .FAILED { background-color: #fee2e2; color: #991b1b; }
+        .NOTEST { background-color: #f1f5f9; color: #475569; }
+
+        /* History Log Section */
+        .history-section { margin-top: 40px; border-top: 2px dashed #cbd5e1; padding-top: 20px; }
+        .history-table { font-size: 13px; }
+        .history-table th { background: #64748b; }
+        .history-table tr:nth-child(odd) { background: #f8fafc; }
+        .timestamp-log { font-family: monospace; color: #e11d48; font-weight: bold; }
+        .action-edit { color: #2563eb; font-weight: bold; }
+
+        @media print {
+            body { background-color: white; padding: 0; }
+            .container { box-shadow: none; max-width: 100%; padding: 0; margin: 0; border: none; }
+            .section { border: none; padding: 0; margin-bottom: 20px; }
+            .btn-add, .btn-save, .btn-print, #newTesterName { display: none !important; }
+            .row > div:nth-child(2) { display: none !important; } /* ซ่อนช่องเพิ่มชื่อ Tester */
+            
+            .status-select { -webkit-print-color-adjust: exact; print-color-adjust: exact; appearance: none; border: none; }
+            .history-section { page-break-before: always; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>📊 Test Result & Audit Log System</h2>
+
+    <div class="section">
+        <div class="row">
+            <div style="display: flex; flex-direction: column; gap: 5px; flex: 1;">
+                <label>เลือกเวลาทดสอบ:</label>
+                <select id="mainTimeSelect" onchange="renderTable()"></select>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 5px; flex: 1;">
+                <label>เพิ่มชื่อ Tester:</label>
+                <input type="text" id="newTesterName" placeholder="ระบุชื่อใหม่">
+            </div>
+            <button class="btn-add" onclick="addNewTester()">+ เพิ่มชื่อ</button>
+            <button class="btn-save" onclick="saveAllData()" style="margin-left: auto;">💾 บันทึกข้อมูลและลงประวัติ</button>
+            <button class="btn-print" onclick="window.print()">🖨️ พิมพ์</button>
+        </div>
+    </div>
+
+    <div class="section" style="padding:0; background:white; overflow:hidden;">
+        <table id="mainTable">
+            <thead>
+                <tr>
+                    <th width="30%">Tester Name</th>
+                    <th width="20%">Result</th>
+                    <th width="50%">Remark</th>
+                </tr>
+            </thead>
+            <tbody id="testerTableBody"></tbody>
+        </table>
+    </div>
+
+    <div class="history-section">
+        <h3>📜 ประวัติการบันทึก (แก้ไขไม่ได้ - Read Only)</h3>
+        <table class="history-table">
+            <thead>
+                <tr>
+                    <th>วัน/เวลาที่ทำรายการ</th>
+                    <th>รอบเวลาที่บันทึก</th>
+                    <th>Tester Name</th>
+                    <th>Result</th>
+                    <th>Remark</th>
+                </tr>
+            </thead>
+            <tbody id="historyLogBody">
+                </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+    const defaultTesters = [
+        "Palomar-4C#1", "Palomar-4C#2", "Palomar-4C#4", "Palomar-4C#5",
+        "Makoshark-4C#1", "Makoshark-4C#2", "Makoshark-4C#3", "Makoshark-4C#4",
+        "Makoshark_Charr-4C #1", "Makoshark_Charr-4C #2",
+        "Makoshark_Pampanito-4C #1", "Makoshark_Pampanito-4C #2", "Makoshark_Pampanito-4C #3",
+        "Makoshark_Lamprey-4C #1", "Makoshark_Seawolf-4C #1"
+    ];
+
+    let testers = JSON.parse(localStorage.getItem('savedTesters')) || defaultTesters;
+    let logs = JSON.parse(localStorage.getItem('testLogDB_v3')) || {}; 
+    let history = JSON.parse(localStorage.getItem('auditTrail')) || [];
+
+    window.onload = () => {
+        generateTimeOptions();
+        renderTable();
+        renderHistory();
+    };
+
+    function generateTimeOptions() {
+        const select = document.getElementById('mainTimeSelect');
+        let start = new Date(); start.setHours(19, 30, 0);
+        let end = new Date(); end.setDate(end.getDate() + 1); end.setHours(7, 0, 0);
+
+        while (start <= end) {
+            let timeStr = start.getHours().toString().padStart(2, '0') + ":" + start.getMinutes().toString().padStart(2, '0');
+            let opt = document.createElement("option"); opt.value = timeStr; opt.text = timeStr;
+            select.add(opt);
+            start.setMinutes(start.getMinutes() + 30);
+        }
+    }
+
+    function renderTable() {
+        const selectedTime = document.getElementById('mainTimeSelect').value;
+        const tbody = document.getElementById('testerTableBody');
+        tbody.innerHTML = "";
+        const timeData = logs[selectedTime] || {};
+
+        testers.forEach(tester => {
+            const row = tbody.insertRow();
+            const currentStatus = timeData[tester]?.result || "No test";
+            const currentRemark = timeData[tester]?.remark || "";
+            row.innerHTML = `
+                <td><strong>${tester}</strong></td>
+                <td>
+                    <select class="status-select ${currentStatus.replace(" ","")}" onchange="this.className='status-select '+this.value.replace(' ','')">
+                        <option value="No test" ${currentStatus === 'No test' ? 'selected' : ''}>No test</option>
+                        <option value="PASSED" ${currentStatus === 'PASSED' ? 'selected' : ''}>PASSED</option>
+                        <option value="FAILED" ${currentStatus === 'FAILED' ? 'selected' : ''}>FAILED</option>
+                    </select>
+                </td>
+                <td><input type="text" class="remark-input" style="width:95%; padding:5px;" value="${currentRemark}"></td>
+            `;
+        });
+    }
+
+    function saveAllData() {
+        const selectedTime = document.getElementById('mainTimeSelect').value;
+        const rows = document.querySelectorAll('#testerTableBody tr');
+        const now = new Date().toLocaleString('th-TH'); // เวลาที่กดบันทึกจริง
+        
+        if (!logs[selectedTime]) logs[selectedTime] = {};
+
+        rows.forEach(row => {
+            const name = row.cells[0].innerText;
+            const result = row.cells[1].querySelector('select').value;
+            const remark = row.cells[2].querySelector('input').value;
+
+            // ตรวจสอบว่ามีการเปลี่ยนแปลงหรือไม่ก่อนลง Log
+            const oldData = logs[selectedTime][name];
+            if (!oldData || oldData.result !== result || oldData.remark !== remark) {
+                // เพิ่มเข้า History
+                history.unshift({
+                    timestamp: now,
+                    shiftTime: selectedTime,
+                    tester: name,
+                    result: result,
+                    remark: remark
+                });
+                // อัปเดตข้อมูลปัจจุบัน
+                logs[selectedTime][name] = { result, remark };
+            }
+        });
+
+        localStorage.setItem('testLogDB_v3', JSON.stringify(logs));
+        localStorage.setItem('auditTrail', JSON.stringify(history));
+        renderHistory();
+        alert("บันทึกข้อมูลและอัปเดตประวัติการแก้ไขแล้ว");
+    }
+
+    function renderHistory() {
+        const tbody = document.getElementById('historyLogBody');
+        tbody.innerHTML = "";
+        history.slice(0, 100).forEach(item => { // แสดง 100 รายการล่าสุด
+            const row = tbody.insertRow();
+            row.innerHTML = `
+                <td class="timestamp-log">${item.timestamp}</td>
+                <td><strong>${item.shiftTime}</strong></td>
+                <td>${item.tester}</td>
+                <td>${item.result}</td>
+                <td>${item.remark}</td>
+            `;
+        });
+    }
+
+    function addNewTester() {
+        const name = document.getElementById('newTesterName').value.trim();
+        if (name && !testers.includes(name)) {
+            testers.push(name);
+            localStorage.setItem('savedTesters', JSON.stringify(testers));
+            renderTable();
+        }
+    }
+</script>
+
+</body>
+</html>
